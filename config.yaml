@@ -1,0 +1,16 @@
+# config.yaml - Simplified
+server:
+  host: "localhost"
+  port: 8080
+
+mock:
+  # Delay in seconds after receiving the *first* audio chunk before responding
+  responseDelaySeconds: 5
+  # Path to the WAV file to play back (must be 16-bit PCM, 24kHz Mono ideally)
+  audioWavPath: "./mock_audio.wav"
+  # The complete mock transcript text to send
+  transcriptText: "This is the simplified mock transcript being sent back."
+  # How often to send audio/transcript chunks (milliseconds)
+  chunkIntervalMs: 100
+  # How many audio data bytes (after header) per chunk
+  audioChunkSizeBytes: 4096
