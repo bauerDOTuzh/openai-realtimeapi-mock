@@ -1,0 +1,10 @@
+# test_config.yaml
+server:
+  host: "localhost"
+  port: 8081 # Use a different port than default to avoid conflicts
+mock:
+  responseDelaySeconds: 1
+  audioWavPath: "./mock_audio.wav" # Assuming mock_audio.wav is in the root
+  transcriptText: "Test transcript for testing."
+  chunkIntervalMs: 50
+  audioChunkSizeBytes: 1024
