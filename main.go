@@ -22,8 +22,7 @@ import (
 // --- Configuration Structs ---
 
 type ServerConfig struct {
-	Host string `yaml:"host"`
-	Port int    `yaml:"port"`
+	Port int `yaml:"port"`
 }
 
 type MockConfig struct {
@@ -136,10 +135,6 @@ func main() {
 	}
 	log.Printf("Successfully loaded and processed configuration from %s", loadedConfigFile)
 
-	// Basic validation/defaults
-	if appConfig.Server.Host == "" {
-		appConfig.Server.Host = "localhost"
-	}
 	if appConfig.Server.Port == 0 {
 		appConfig.Server.Port = 8080
 	}
@@ -162,12 +157,11 @@ func main() {
 		log.Printf("WARNING: No audioWavPath configured. Audio playback will not occur.")
 	}
 
-
 	// Setup HTTP Routes
 	router := setupRouter()
 
-	// Start Server
-	addr := fmt.Sprintf("%s:%d", appConfig.Server.Host, appConfig.Server.Port)
+	// Start Server -> we dont need host there to work, it bunds to all interfaces and is easier for docker
+	addr := fmt.Sprintf(":%d", appConfig.Server.Port)
 	log.Printf("Starting Simplified OpenAI Realtime Mock server on %s", addr)
 	log.Printf("Response Delay: %d seconds", appConfig.Mock.ResponseDelaySeconds)
 	log.Printf("Using Audio File: %s", appConfig.Mock.AudioWavPath) // Log the potentially resolved path
@@ -320,7 +314,7 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 				log.Printf("Client %s: First binary audio received. Starting %ds response timer.", conn.RemoteAddr(), appConfig.Mock.ResponseDelaySeconds)
 				if responseTimer != nil {
 					responseTimer.Stop()
-				} 
+				}
 				responseTimer = time.AfterFunc(time.Duration(appConfig.Mock.ResponseDelaySeconds)*time.Second, func() {
 					log.Printf("Client %s: Response timer fired (from binary). Starting audio/transcript stream.", conn.RemoteAddr())
 					go streamResponse(conn, sessionID, convID)
@@ -342,9 +336,9 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 func streamResponse(conn *websocket.Conn, sessionID, convID string) {
 	responseID := "mock-resp-" + uuid.NewString()
-	itemID := "mock-item-" + uuid.NewString() 
-	contentIndexAudio := 0                   
-	contentIndexText := 1                    
+	itemID := "mock-item-" + uuid.NewString()
+	contentIndexAudio := 0
+	contentIndexText := 1
 
 	log.Printf("Client %s: Streaming response (RespID: %s)", conn.RemoteAddr(), responseID)
 
@@ -366,7 +360,7 @@ func streamResponse(conn *websocket.Conn, sessionID, convID string) {
 	}
 
 	if appConfig.Mock.TranscriptText != "" {
-		textPartAdded := map[string]interface{}{"type": "response.content_part.added", "event_id": uuid.NewString(), "response_id": responseID, "item_id": itemID, "output_index": 0, "content_index": contentIndexText, "part": map[string]interface{}{"type": "text"}} 
+		textPartAdded := map[string]interface{}{"type": "response.content_part.added", "event_id": uuid.NewString(), "response_id": responseID, "item_id": itemID, "output_index": 0, "content_index": contentIndexText, "part": map[string]interface{}{"type": "text"}}
 		if err := sendJSONEvent(conn, textPartAdded); err != nil {
 			return
 		}
@@ -404,13 +398,17 @@ func streamResponse(conn *websocket.Conn, sessionID, convID string) {
 
 	if appConfig.Mock.AudioWavPath != "" {
 		audioPartDone := map[string]interface{}{"type": "response.content_part.done", "event_id": uuid.NewString(), "response_id": responseID, "item_id": itemID, "output_index": 0, "content_index": contentIndexAudio, "part": map[string]interface{}{"type": "audio"}}
-		if err := sendJSONEvent(conn, audioPartDone); err != nil { return }
+		if err := sendJSONEvent(conn, audioPartDone); err != nil {
+			return
+		}
 	}
 	if appConfig.Mock.TranscriptText != "" {
 		textPartDone := map[string]interface{}{"type": "response.content_part.done", "event_id": uuid.NewString(), "response_id": responseID, "item_id": itemID, "output_index": 0, "content_index": contentIndexText, "part": map[string]interface{}{"type": "text", "text": appConfig.Mock.TranscriptText}}
-		if err := sendJSONEvent(conn, textPartDone); err != nil { return }
+		if err := sendJSONEvent(conn, textPartDone); err != nil {
+			return
+		}
 	}
-	
+
 	// Construct content for itemDone based on what was actually streamed
 	itemDoneContent := []interface{}{}
 	if appConfig.Mock.AudioWavPath != "" {
@@ -420,13 +418,12 @@ func streamResponse(conn *websocket.Conn, sessionID, convID string) {
 		itemDoneContent = append(itemDoneContent, map[string]interface{}{"type": "text", "text": appConfig.Mock.TranscriptText})
 	}
 
-
 	itemDone := map[string]interface{}{"type": "response.output_item.done", "event_id": uuid.NewString(), "response_id": responseID, "output_index": 0, "item": map[string]interface{}{"id": itemID, "object": "realtime.item", "type": "message", "status": "completed", "role": "assistant", "content": itemDoneContent}}
 	if err := sendJSONEvent(conn, itemDone); err != nil {
 		return
 	}
 
-	respDone := map[string]interface{}{"type": "response.done", "event_id": uuid.NewString(), "response": map[string]interface{}{"id": responseID, "object": "realtime.response", "status": "completed", "output": []interface{}{map[string]interface{}{"id": itemID, "object": "realtime.item", "type": "message", "status": "completed"}}}} 
+	respDone := map[string]interface{}{"type": "response.done", "event_id": uuid.NewString(), "response": map[string]interface{}{"id": responseID, "object": "realtime.response", "status": "completed", "output": []interface{}{map[string]interface{}{"id": itemID, "object": "realtime.item", "type": "message", "status": "completed"}}}}
 	if err := sendJSONEvent(conn, respDone); err != nil {
 		return
 	}
@@ -436,7 +433,7 @@ func streamResponse(conn *websocket.Conn, sessionID, convID string) {
 
 func streamAudio(conn *websocket.Conn, responseID, itemID string, contentIndex int) {
 	// This check is now effectively handled by the caller (streamResponse)
-	// if appConfig.Mock.AudioWavPath == "" { ... } 
+	// if appConfig.Mock.AudioWavPath == "" { ... }
 	file, err := os.Open(appConfig.Mock.AudioWavPath)
 	if err != nil {
 		log.Printf("Client %s: ERROR opening audio file %s: %v", conn.RemoteAddr(), appConfig.Mock.AudioWavPath, err)
@@ -475,18 +472,18 @@ func streamAudio(conn *websocket.Conn, responseID, itemID string, contentIndex i
 			}
 			if err := sendJSONEvent(conn, audioDelta); err != nil {
 				log.Printf("Client %s: Error sending audio delta: %v", conn.RemoteAddr(), err)
-				return 
+				return
 			}
 		}
 
 		if err == io.EOF {
 			log.Printf("Client %s: Reached EOF for audio file %s", conn.RemoteAddr(), appConfig.Mock.AudioWavPath)
-			break 
+			break
 		}
 		if err != nil {
 			log.Printf("Client %s: ERROR reading WAV data from %s: %v", conn.RemoteAddr(), appConfig.Mock.AudioWavPath, err)
 			sendErrorEvent(conn, "audio_file_error", fmt.Sprintf("Error reading audio data: %v", err))
-			break 
+			break
 		}
 	}
 	// The 'response.audio.done' event is now sent by the caller (streamResponse)
@@ -510,7 +507,7 @@ func streamTranscript(conn *websocket.Conn, responseID, itemID string, contentIn
 
 	for range ticker.C {
 		if wordIndex >= len(words) {
-			break 
+			break
 		}
 
 		delta := words[wordIndex] + " "
@@ -521,13 +518,13 @@ func streamTranscript(conn *websocket.Conn, responseID, itemID string, contentIn
 			"event_id":      uuid.NewString(),
 			"response_id":   responseID,
 			"item_id":       itemID,
-			"output_index":  0, 
+			"output_index":  0,
 			"content_index": contentIndex,
 			"delta":         delta,
 		}
 		if err := sendJSONEvent(conn, transcriptDelta); err != nil {
 			log.Printf("Client %s: Error sending transcript delta: %v", conn.RemoteAddr(), err)
-			return 
+			return
 		}
 		wordIndex++
 	}
@@ -537,12 +534,12 @@ func streamTranscript(conn *websocket.Conn, responseID, itemID string, contentIn
 
 // --- Helper Functions ---
 
-var wsWriteMutex sync.Mutex 
+var wsWriteMutex sync.Mutex
 
 func sendJSONEvent(conn *websocket.Conn, event interface{}) error {
 	wsWriteMutex.Lock()
 	defer wsWriteMutex.Unlock()
-	
+
 	// Check if connection is still valid before writing
 	if conn == nil {
 		log.Printf("Attempted to write to a nil WebSocket connection.")

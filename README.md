@@ -6,7 +6,7 @@ This Go application provides a **basic mock server** for the WebSocket portion o
 
 ## What it Does
 
-*   **Listens for WebSocket connections** on a configurable host and port (defaults to `ws://localhost:8080/v1/realtime`).
+*   **Listens for WebSocket connections** on a configurable  port (defaults to `ws://localhost:8080/v1/realtime`).
 *   Provides a minimal **HTTP endpoint** (`/v1/realtime/sessions`) that returns a fake session object with an ephemeral token, primarily to satisfy clients that need to call this before establishing a WebSocket connection.
 *   Upon WebSocket connection, sends basic **welcome messages** (`session.created`, `conversation.created`).
 *   **Detects the *first* incoming message** that signifies audio input (either a JSON message with `type: "input_audio_buffer.append"` or any binary message).
@@ -41,7 +41,6 @@ Create a file named `config.yaml` in the same directory as the executable.
 ```yaml
 # config.yaml - Simplified
 server:
-  host: "localhost" # Host to bind the server to
   port: 8080        # Port to listen on
 
 mock:
@@ -57,7 +56,7 @@ mock:
   audioChunkSizeBytes: 4096
 ```
 
-*   `server.host`/`server.port`: Network interface and port for the mock server.
+*   `server.port`: Port for the mock server.
 *   `mock.responseDelaySeconds`: How long to wait (in seconds) after receiving the *first* audio input before starting the response stream.
 *   `mock.audioWavPath`: Path to the `.wav` file that will be streamed back.
 *   `mock.transcriptText`: The text that will be streamed back as the transcript.
@@ -103,3 +102,14 @@ mock:
 8.  Click **Send**.
 9.  Wait for the duration specified by `responseDelaySeconds` in your `config.yaml`.
 10. Observe the "Messages" panel again. You should start seeing a stream of events from the server, including `response.created`, `response.audio.delta`, `response.text.delta`, and finally `response.done`.
+
+
+## Docker examples
+### Build the Docker Image
+```bash
+docker build -t simple-mock-server .
+```
+### Run the Docker Container
+```bash
+docker run -d -p 8080:8080 -v $(pwd)/config.yaml:/app/config.yaml simple-mock-server
+```

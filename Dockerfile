@@ -1,5 +1,5 @@
 # 1. Base Image
-FROM golang:1.22-alpine AS builder
+FROM golang:1.24-alpine AS builder
 
 # 2. Working Directory
 WORKDIR /app
@@ -36,6 +36,7 @@ COPY --from=builder /app/simple-mock-server /app/simple-mock-server
 # 8. Copy Default Configuration
 # Create a directory for the default configuration
 RUN mkdir -p /app/config
+
 # Copy config.yaml and mock_audio.wav into /app/config/
 # These files must exist in the context root when 'docker build' is run.
 COPY config.yaml /app/config/config.yaml

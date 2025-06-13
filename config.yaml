@@ -1,6 +1,5 @@
 # config.yaml - Simplified
 server:
-  host: "localhost"
   port: 8080
 
 mock:

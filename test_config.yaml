@@ -1,6 +1,5 @@
 # test_config.yaml
 server:
-  host: "localhost"
   port: 8081 # Use a different port than default to avoid conflicts
 mock:
   responseDelaySeconds: 1
