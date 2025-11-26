@@ -1,115 +1,139 @@
 # Simple OpenAI Realtime API WebSocket Mock
 
-This Go application provides a **basic mock server** for the WebSocket portion of the OpenAI Realtime API. It is designed for simple testing scenarios where you need a server that mimics the basic interaction flow: connect, receive some audio indication, wait for a delay, and then stream back a pre-defined audio file and transcript.
+This Go application provides a **basic mock server** for the WebSocket portion of the OpenAI Realtime API. It is designed for testing scenarios where you need a server that mimics the basic interaction flow, including configurable delays, function calls, and user transcriptions.
 
 **This is a highly simplified mock and does NOT replicate the full functionality or complexity of the real OpenAI API.**
 
-## What it Does
+## Features
 
-*   **Listens for WebSocket connections** on a configurable  port (defaults to `ws://localhost:8080/v1/realtime`).
-*   Provides a minimal **HTTP endpoint** (`/v1/realtime/sessions`) that returns a fake session object with an ephemeral token, primarily to satisfy clients that need to call this before establishing a WebSocket connection.
-*   Upon WebSocket connection, sends basic **welcome messages** (`session.created`, `conversation.created`).
-*   **Detects the *first* incoming message** that signifies audio input (either a JSON message with `type: "input_audio_buffer.append"` or any binary message).
-*   After detecting the first audio input, it **starts a configurable delay timer**.
-*   When the timer fires, it **streams back audio data** chunk by chunk (`response.audio.delta`) by reading from a specified WAV file.
-*   Simultaneously, it **streams back a pre-defined transcript** chunk by chunk (`response.text.delta` events).
-*   Sends basic **response lifecycle events** (`response.created`, `*.added`, `*.done`) around the streaming process.
-*   Configuration is managed through a `config.yaml` file.
-
-## What it Does NOT Do
-
-*   **No WebRTC Support:** Only mocks the WebSocket connection method.
-*   **No Real Audio Processing:** It doesn't listen to, analyze, or transcribe the incoming audio data. The Base64 audio payload in `input_audio_buffer.append` is ignored.
-*   **No Voice Activity Detection (VAD):** The response is triggered by the *first* audio message received, not by detecting speech pauses.
-*   **No Actual AI/LLM Interaction:** The transcript and audio playback are pre-defined in the config/WAV file.
-*   **Limited Event Handling:** Only really acts upon the first audio message. Other client events are mostly ignored or logged.
-*   **No Authentication:** Doesn't validate API keys or tokens.
-*   **Basic Error Handling:** Error handling is minimal.
-*   **No Complex State Management:** Doesn't track conversation history, tools, etc.
+*   **Scenario-Based Execution:** Define multiple named scenarios in `config.yaml` and select them at runtime.
+*   **Configurable Delays:** Simulate network or processing latency with global response delays and per-event delays.
+*   **Event Types:**
+    *   `message`: Streams back audio and text (transcript).
+    *   `function_call`: Simulates OpenAI's function call events (`response.function_call_arguments.delta`, etc.).
+    *   `user_transcription`: Simulates the server acknowledging user speech with a transcription event.
+*   **Audio Streaming:** Streams 24kHz PCM16 audio from a WAV file.
+*   **WebSocket & HTTP:** Listens for WebSocket connections and provides a session creation endpoint.
 
 ## Prerequisites
 
 *   **Go:** Version 1.18 or later recommended.
 *   **A WAV Audio File:** You need a `.wav` file containing the audio you want the mock to stream back.
-    *   **Format:** Ideally, this should be **16-bit PCM, single-channel (mono), 24kHz sample rate**, as this matches common formats expected by the Realtime API clients. The mock *attempts* to skip a 44-byte header but doesn't validate the format strictly.
-*   **WebSocket Client:** A tool like Postman or a custom client application to connect to the mock server.
+    *   **Format:** **MUST be 16-bit PCM, single-channel (mono), 24kHz sample rate**. The server validates this format on startup.
+*   **WebSocket Client:** A tool like Postman, `wscat`, or a custom client application.
 
 ## Configuration (`config.yaml`)
 
-Create a file named `config.yaml` in the same directory as the executable.
+Create a `config.yaml` file in the same directory as the executable.
 
 ```yaml
-# config.yaml - Simplified
 server:
-  port: 8080        # Port to listen on
+  port: 8080
 
 mock:
   # Delay in seconds after receiving the *first* audio chunk before responding
-  responseDelaySeconds: 5
-  # Path to the WAV file to play back (e.g., ./my_audio.wav)
+  responseDelaySeconds: 2
+  # Path to the WAV file to play back (MUST be 24kHz PCM16 Mono)
   audioWavPath: "./mock_audio.wav"
-  # The complete mock transcript text to send back chunk by chunk
-  transcriptText: "This is the simplified mock transcript being sent back."
   # How often to send audio/transcript chunks (milliseconds)
   chunkIntervalMs: 100
-  # How many audio data bytes (after header) per chunk to send in response.audio.delta
+  # How many audio data bytes per chunk to send
   audioChunkSizeBytes: 4096
+
+scenarios:
+  - name: default
+    events:
+      - type: message
+        delay_ms: 1000
+        text: "This is the default response."
+
+  - name: booking_flow
+    events:
+      - type: user_transcription
+        delay_ms: 500
+        text: "I want to book a flight."
+      - type: message
+        delay_ms: 1000
+        text: "Sure, where are you flying to?"
+      - type: function_call
+        delay_ms: 2000
+        function_call:
+          name: "search_flights"
+          arguments: "{\"destination\": \"London\"}"
 ```
 
-*   `server.port`: Port for the mock server.
-*   `mock.responseDelaySeconds`: How long to wait (in seconds) after receiving the *first* audio input before starting the response stream.
-*   `mock.audioWavPath`: Path to the `.wav` file that will be streamed back.
-*   `mock.transcriptText`: The text that will be streamed back as the transcript.
-*   `mock.chunkIntervalMs`: The delay between sending each chunk of audio and transcript data. Controls the streaming speed.
-*   `mock.audioChunkSizeBytes`: The size (in bytes) of each audio data chunk read from the WAV file (after skipping the header) and sent in `response.audio.delta` events.
+## Usage
 
-## Setup and Running
-
-1.  **Save the Code:** Save the Go script provided previously as `main.go`.
-2.  **Create `config.yaml`:** Create the configuration file as described above.
-3.  **Prepare Audio File:** Place your desired `.wav` file (e.g., `mock_audio.wav`) in the same directory, ensuring its path matches the `audioWavPath` in `config.yaml`.
-4.  **Get Dependencies:** Open a terminal in the directory and run:
-    ```bash
-    go mod init simplemock # Or your preferred module name
-    go mod tidy
-    ```
-5.  **Build:**
-    ```bash
-    go build -o simple-mock-server .
-    ```
-6.  **Run:**
-    ```bash
-    ./simple-mock-server -config config.yaml
-    # Or just ./simple-mock-server if config.yaml is the default name/location
-    ```
-    The server will start logging to the console.
-
-## Testing with Postman
-
-1.  Ensure the mock server is running.
-2.  Open Postman and create a new **WebSocket Request**.
-3.  Enter the Server URL: `ws://localhost:8080/v1/realtime` (adjust host/port if changed in config).
-4.  Click **Connect**.
-5.  In the "Messages" panel, you should see the `session.created` and `conversation.created` events arrive from the server.
-6.  Go to the message composer section below the messages panel. Select `Text` (or `JSON`) format.
-7.  Paste the following JSON message to simulate sending audio data:
-    ```json
-    {
-      "type": "input_audio_buffer.append",
-      "audio": "AAA=" // Minimal valid Base64 placeholder - content doesn't matter to mock
-    }
-    ```
-8.  Click **Send**.
-9.  Wait for the duration specified by `responseDelaySeconds` in your `config.yaml`.
-10. Observe the "Messages" panel again. You should start seeing a stream of events from the server, including `response.created`, `response.audio.delta`, `response.text.delta`, and finally `response.done`.
-
-
-## Docker examples
-### Build the Docker Image
+### 1. Start the Server
 ```bash
-docker build -t simple-mock-server .
+go run main.go --config config.yaml
 ```
-### Run the Docker Container
+
+### 2. Connect via WebSocket
+You can select a specific scenario using the `scenario` query parameter.
+
+*   **Default Scenario:** `ws://localhost:8080/v1/realtime`
+*   **Specific Scenario:** `ws://localhost:8080/v1/realtime?scenario=booking_flow`
+
+### 3. Trigger the Interaction
+Send a JSON message with `type: input_audio_buffer.append` and some base64 audio data to start the interaction.
+
+```json
+{
+  "type": "input_audio_buffer.append",
+  "audio": "UklGRi..." // Base64 encoded audio
+}
+```
+
+The server will wait for `responseDelaySeconds` and then execute the events defined in the selected scenario.
+
+## Proxy Mode & Recording
+
+The mock service can act as a proxy to the real OpenAI Realtime API. In this mode, it forwards all traffic between the client and OpenAI, and **records the session** to an NDJSON file.
+
+### Enable Proxy Mode
+Update `config.yaml`:
+```yaml
+mode: "proxy"
+proxy:
+  url: "wss://api.openai.com/v1/realtime"
+  recordingPath: "./recordings"
+  model: "gpt-4o-mini-realtime-preview-2024-12-17"
+```
+Ensure `OPENAI_API_KEY` is set in your environment.
+
+### Recording
+When a client connects in proxy mode, a new file is created in `recordingPath` (e.g., `recordings/2025-11-26_14-30-00.ndjson`). This file contains timestamped events from the session.
+
+## Replay a Session
+
+You can replay a recorded session to simulate the exact timing and data of a real interaction.
+
+1.  Set `mode: "mock"` in `config.yaml`.
+2.  Connect to the WebSocket with the `replaySession` parameter pointing to the recording filename.
+
+```
+ws://localhost:8080/v1/realtime?replaySession=2025-11-26_14-30-00.ndjson
+```
+
+The mock service will:
+1.  Locate the file in the `recordings` directory.
+2.  Replay the events with the **exact delays** as they occurred in the original session.
+
+## Docker Usage
+
+### Build
 ```bash
-docker run -d -p 8080:8080 -v $(pwd)/config.yaml:/app/config.yaml simple-mock-server
+docker build -t openai-realtime-mock .
 ```
+
+### Run
+```bash
+docker run -d -p 8080:8080 -v $(pwd)/config.yaml:/app/config.yaml -v $(pwd)/mock_audio.wav:/app/mock_audio.wav -v $(pwd)/recordings:/app/recordings openai-realtime-mock
+```
+
+## Alternative testing method
+- use commit 6ea4dba795fee868c60ea9e8e7eba7469974b3e9 from openai realtime console and replace in file (after npm i) `node_modules/@openai/realtime-api-beta/lib/api.js:117` websocket to the desired one eg `ws://localhost:8085/v1/realtime?model=gpt-realtime-mini&scenario=complex_conversation`
+
+or use `ws://localhost:8085/v1/realtime` and start your mock in proxy mode, 
+then a new recording is created and this can be then accessed after changing to proxy and to ws://localhost:8085/v1/realtime?model=gpt-realtime-mini&replaySession=2025-11-26_13-15-49.ndjson

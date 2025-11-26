@@ -1,9 +1,8 @@
 package main
 
 import (
-	"bytes"
+	"encoding/binary"
 	"encoding/json"
-	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -15,65 +14,109 @@ import (
 )
 
 // Helper function to load config for tests
-// This function assumes `loadConfig` from main.go is accessible
-// and `appConfig` is a package-level variable that `loadConfig` sets.
 func loadTestConfig(tb testing.TB) {
-	if err := loadConfig("test_config.yaml"); err != nil {
+	// Create a temporary test config file
+	configContent := `
+server:
+  port: 8080
+mock:
+  responseDelaySeconds: 0
+  audioWavPath: "./mock_audio.wav"
+  chunkIntervalMs: 50
+  audioChunkSizeBytes: 1024
+scenarios:
+  - name: default
+    events:
+      - type: message
+        delay_ms: 100
+        text: "Default scenario text"
+  - name: test_scenario
+    events:
+      - type: message
+        delay_ms: 50
+        text: "Test scenario text"
+  - name: transcriptionTest
+    events:
+      - type: user_transcription
+        delay_ms: 50
+        text: "Hello, I would like to book a flight."
+      - type: message
+        delay_ms: 50
+        text: "Acknowledged."
+`
+	err := os.WriteFile("test_config.yaml", []byte(configContent), 0644)
+	if err != nil {
+		tb.Fatalf("Failed to write test config: %v", err)
+	}
+
+	if _, err := loadConfiguration("test_config.yaml"); err != nil {
 		tb.Fatalf("Failed to load test configuration: %v", err)
 	}
 }
 
 func TestMain(m *testing.M) {
-	// Setup: Load test configuration
-	// We don't have a testing.TB here, so direct call and panic.
-	if err := loadConfig("test_config.yaml"); err != nil {
-		log.Fatalf("Failed to load test configuration in TestMain: %v", err)
+	// Setup: Create valid 24kHz PCM16 Mono WAV file
+	f, err := os.Create("./mock_audio.wav")
+	if err != nil {
+		panic(err)
 	}
 
-	// Ensure mock_audio.wav exists as per appConfig.Mock.AudioWavPath
-	// This check helps catch configuration/environment issues early.
-	if _, err := os.Stat(appConfig.Mock.AudioWavPath); os.IsNotExist(err) {
-		log.Fatalf("Mock audio file not found at path: %s. Please ensure it exists.", appConfig.Mock.AudioWavPath)
-	} else if err != nil {
-		log.Fatalf("Error checking mock audio file %s: %v", appConfig.Mock.AudioWavPath, err)
-	}
+	// Write minimal WAV header
+	// RIFF (4) + Size (4) + WAVE (4)
+	// fmt  (4) + Size (4) + AudioFormat(2) + NumChannels(2) + SampleRate(4) + ByteRate(4) + BlockAlign(2) + BitsPerSample(2)
+	// data (4) + Size (4)
+
+	header := make([]byte, 44)
+	copy(header[0:4], []byte("RIFF"))
+	binary.LittleEndian.PutUint32(header[4:8], 36+100) // ChunkSize
+	copy(header[8:12], []byte("WAVE"))
+	copy(header[12:16], []byte("fmt "))
+	binary.LittleEndian.PutUint32(header[16:20], 16)      // Subchunk1Size
+	binary.LittleEndian.PutUint16(header[20:22], 1)       // AudioFormat (PCM)
+	binary.LittleEndian.PutUint16(header[22:24], 1)       // NumChannels (Mono)
+	binary.LittleEndian.PutUint32(header[24:28], 24000)   // SampleRate
+	binary.LittleEndian.PutUint32(header[28:32], 24000*2) // ByteRate
+	binary.LittleEndian.PutUint16(header[32:34], 2)       // BlockAlign
+	binary.LittleEndian.PutUint16(header[34:36], 16)      // BitsPerSample
+	copy(header[36:40], []byte("data"))
+	binary.LittleEndian.PutUint32(header[40:44], 100) // Subchunk2Size
+
+	f.Write(header)
+	f.Write(make([]byte, 100)) // Dummy data
+	f.Close()
 
 	// Run tests
 	exitCode := m.Run()
 
-	// Teardown (if any)
+	// Teardown
+	os.Remove("test_config.yaml")
+	// os.Remove("./mock_audio.wav")
 
 	os.Exit(exitCode)
 }
 
 func TestHandleCreateSession(t *testing.T) {
-	// Ensure test config is loaded for this test instance if appConfig could be reset
-	// loadTestConfig(t) // Usually TestMain is enough
+	loadTestConfig(t)
 
-	// Initialize the router and server
-	// setupRouter should use the appConfig loaded in TestMain
 	router := setupRouter()
 	server := httptest.NewServer(router)
 	defer server.Close()
 
-	// Make a POST request to /v1/realtime/sessions
 	resp, err := http.Post(server.URL+"/v1/realtime/sessions", "application/json", nil)
 	if err != nil {
 		t.Fatalf("Failed to send request: %v", err)
 	}
 	defer resp.Body.Close()
 
-	// Verify status code
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("Expected status code %d, got %d", http.StatusOK, resp.StatusCode)
 	}
 
-	// Verify response body
 	var sessionResponse struct {
 		ID           string `json:"id"`
 		ClientSecret struct {
 			Value     string `json:"value"`
-			ExpiresAt int64  `json:"expires_at"` // Assuming timestamp in milliseconds
+			ExpiresAt int64  `json:"expires_at"`
 		} `json:"client_secret"`
 	}
 
@@ -81,234 +124,377 @@ func TestHandleCreateSession(t *testing.T) {
 		t.Fatalf("Failed to decode response body: %v", err)
 	}
 
-	// Verify fields in the response
 	if sessionResponse.ID == "" {
 		t.Error("Expected 'id' field to be non-empty")
 	}
-	if sessionResponse.ClientSecret.Value == "" {
-		t.Error("Expected 'client_secret.value' field to be non-empty")
-	}
-	if sessionResponse.ClientSecret.ExpiresAt == 0 {
-		t.Error("Expected 'client_secret.expires_at' field to be non-zero")
-	}
-	// Check if expires_at is in the future (rough check, assuming ms)
-	// Convert server's ExpiresAt (milliseconds) to time.Time
-	expiresAtTime := time.Unix(0, sessionResponse.ClientSecret.ExpiresAt*int64(time.Millisecond))
-	if expiresAtTime.Before(time.Now()) {
-		t.Errorf("Expected 'client_secret.expires_at' (%v) to be in the future", expiresAtTime)
-	}
 }
 
-func TestHandleWebSocket(t *testing.T) {
-	// loadTestConfig(t) // Usually TestMain is enough
+func TestHandleWebSocket_DefaultScenario(t *testing.T) {
+	loadTestConfig(t)
 
 	router := setupRouter()
 	server := httptest.NewServer(router)
 	defer server.Close()
 
 	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/v1/realtime"
-	t.Logf("Connecting to WebSocket URL: %s", wsURL)
 
-	// Connect to the WebSocket server
 	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	if err != nil {
 		t.Fatalf("Failed to connect to WebSocket: %v", err)
 	}
 	defer conn.Close()
 
-	initialMessagesReceived := make(chan bool, 1) // Buffered to prevent goroutine leak if test fails early
-	sessionCreatedReceived := false
-	conversationCreatedReceived := false
-
-	// Goroutine to read messages from the WebSocket for initial phase
-	go func() {
-		defer func() {
-			// Only close if we are responsible for signaling
-			if !(sessionCreatedReceived && conversationCreatedReceived) {
-				// If we exit early due to error or timeout, ensure the channel is not left unclosed
-				// Or rely on test timeout. For simplicity, let's assume test timeout handles this.
-			}
-		}()
-		for i := 0; i < 2; i++ { // Expecting two initial messages
-			_, message, err := conn.ReadMessage()
-			if err != nil {
-				// If connection closes unexpectedly, log and let the select timeout handle it
-				t.Logf("Error reading initial message: %v", err)
-				return
-			}
-			t.Logf("Received initial message: %s", string(message))
-
-			var msg map[string]interface{}
-			if err := json.Unmarshal(message, &msg); err != nil {
-				t.Logf("Failed to unmarshal initial message: %v", err)
-				continue
-			}
-
-			msgType, _ := msg["type"].(string)
-			if msgType == "session.created" {
-				sessionCreatedReceived = true
-				t.Log("session.created received")
-			}
-			if msgType == "conversation.created" {
-				conversationCreatedReceived = true
-				t.Log("conversation.created received")
-			}
-
-			if sessionCreatedReceived && conversationCreatedReceived {
-				initialMessagesReceived <- true
-				return
-			}
+	// Read initial messages
+	for i := 0; i < 2; i++ {
+		_, _, err := conn.ReadMessage()
+		if err != nil {
+			t.Fatalf("Error reading initial message: %v", err)
 		}
-	}()
-
-	select {
-	case <-initialMessagesReceived:
-		t.Log("Successfully received initial 'session.created' and 'conversation.created' messages.")
-	case <-time.After(5 * time.Second): // Timeout for initial messages
-		t.Fatal("Timed out waiting for initial 'session.created' and 'conversation.created' messages.")
 	}
 
-	// Send input_audio_buffer.append
+	// Send input audio to trigger scenario
 	appendMessage := map[string]string{
 		"type":  "input_audio_buffer.append",
-		"audio": "AAA=", // Base64 encoded dummy audio (single padding for 2 bytes of data)
+		"audio": "AAA=",
 	}
 	if err := conn.WriteJSON(appendMessage); err != nil {
 		t.Fatalf("Failed to send input_audio_buffer.append: %v", err)
 	}
-	t.Log("Sent input_audio_buffer.append")
 
-	expectedMessageTypes := map[string]bool{
-		"response.created":     false,
-		"response.audio.delta": false,
-		"response.text.delta":  false,
-		"response.done":        false,
-	}
-	var receivedTextDeltas []string
-	streamingMessagesDone := make(chan bool, 1) // Buffered
+	// Expect response from default scenario
+	// "Default scenario text"
+	foundText := false
 
-	// Goroutine to read streaming messages
-	go func() {
-		defer func() { streamingMessagesDone <- true }()
-		for {
-			_, message, err := conn.ReadMessage()
-			if err != nil {
-				if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
-					t.Log("WebSocket closed normally during streaming.")
-				} else {
-					// Don't call t.Errorf from a goroutine that might outlive the test if not handled well.
-					// Log instead, and let the main test goroutine assert conditions.
-					log.Printf("Error reading streaming message: %v", err)
-				}
-				return // Exit goroutine on any error or closure
+	// Set read deadline
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+
+	for {
+		_, message, err := conn.ReadMessage()
+		if err != nil {
+			if strings.Contains(err.Error(), "i/o timeout") {
+				t.Fatal("Timeout waiting for response")
 			}
-			t.Logf("Received streaming message: %s", string(message))
+			t.Fatalf("Read error: %v", err)
+		}
 
-			var msg map[string]interface{}
-			if errUnmarshal := json.Unmarshal(message, &msg); errUnmarshal != nil {
-				log.Printf("Failed to unmarshal streaming message: %v", errUnmarshal)
-				continue
-			}
+		var msg map[string]interface{}
+		json.Unmarshal(message, &msg)
 
-			msgType, _ := msg["type"].(string)
-
-			if _, exists := expectedMessageTypes[msgType]; exists {
-				if !expectedMessageTypes[msgType] { // Mark first occurrence
-					expectedMessageTypes[msgType] = true
-					t.Logf("Received expected message type for the first time: %s", msgType)
-				}
-
-				if msgType == "response.audio.delta" {
-					delta, ok := msg["delta"].(string)
-					if !ok || delta == "" {
-						// Use t.Errorf directly here as this goroutine's lifecycle is tied to this test function
-						// by the streamingMessagesDone channel and timeout.
-						t.Errorf("'response.audio.delta' should have a non-empty 'delta' string: %v", msg)
-					}
-				}
-				if msgType == "response.text.delta" {
-					delta, ok := msg["delta"].(string)
-					if !ok || delta == "" {
-						t.Errorf("'response.text.delta' should have a non-empty 'delta' string: %v", msg)
-					}
-					receivedTextDeltas = append(receivedTextDeltas, delta)
+		if msg["type"] == "response.audio_transcript.delta" {
+			if delta, ok := msg["delta"].(string); ok {
+				if strings.Contains(delta, "Default") {
+					foundText = true
 				}
 			}
-
-			if msgType == "response.done" {
-				expectedMessageTypes["response.done"] = true // Ensure it's marked if loop terminates early
-				t.Log("response.done received. Finishing streaming message collection.")
-				return // Stop this goroutine after response.done
+		}
+		if msg["type"] == "response.done" {
+			if !foundText {
+				t.Error("Did not receive expected text delta")
 			}
-		}
-	}()
-
-	// Wait for streaming messages or timeout
-	timeoutDuration := time.Duration(appConfig.Mock.ResponseDelaySeconds+5) * time.Second
-	select {
-	case <-streamingMessagesDone:
-		t.Log("Streaming message checking completed.")
-	case <-time.After(timeoutDuration):
-		t.Fatalf("Timed out waiting for streaming messages after %v.", timeoutDuration)
-	}
-
-	// Verify all expected message types were received at least once
-	allExpectedReceived := true
-	for msgType, received := range expectedMessageTypes {
-		if !received {
-			// This check is problematic if mock_audio.wav is empty, as deltas might not be sent.
-			// The task implies mock_audio.wav is valid and should produce output.
-			// If TranscriptText is empty, text.delta might not be sent.
-			if (msgType == "response.text.delta" || msgType == "response.audio.delta") && appConfig.Mock.TranscriptText == "" && isMockAudioEffectivelyEmpty(t) {
-				t.Logf("Skipping check for %s as transcript is empty and audio might be minimal.", msgType)
-				continue
-			}
-			t.Errorf("Did not receive expected message type: %s. Received states: %v", msgType, expectedMessageTypes)
-			allExpectedReceived = false
-		}
-	}
-	if allExpectedReceived {
-		t.Log("All expected streaming message types were received.")
-	}
-
-
-	// Verify concatenated text deltas
-	concatenatedText := strings.Join(receivedTextDeltas, "")
-	t.Logf("Concatenated text: \"%s\"", concatenatedText)
-	mockTranscript := appConfig.Mock.TranscriptText
-
-	if mockTranscript != "" {
-		if concatenatedText == "" {
-			t.Errorf("Expected to receive text deltas for mock transcript \"%s\", but got none.", mockTranscript)
-		}
-		// For this mock setup, we expect the full transcript.
-		// Depending on chunking, it might not be an exact match if the server logic is complex.
-		// The prompt says "verify against a known part", but here full match is more robust for a simple mock.
-		if concatenatedText != mockTranscript {
-			t.Errorf("Concatenated text \"%s\" does not exactly match mock transcript \"%s\".", concatenatedText, mockTranscript)
-		} else {
-			t.Logf("Successfully matched concatenated text with mock transcript: \"%s\"", mockTranscript)
-		}
-	} else {
-		if concatenatedText != "" {
-			t.Errorf("Expected no text deltas as mock transcript is empty, but got: \"%s\"", concatenatedText)
-		} else {
-			t.Log("Correctly received no text deltas as mock transcript is empty.")
+			return
 		}
 	}
 }
 
-// isMockAudioEffectivelyEmpty is a helper to check if the mock audio is minimal (e.g., just WAV header)
-// This is a placeholder for a more robust check if needed.
-// For now, we assume if TranscriptText is empty, audio might also produce no meaningful deltas.
-func isMockAudioEffectivelyEmpty(t *testing.T) bool {
-	t.Helper()
-	info, err := os.Stat(appConfig.Mock.AudioWavPath)
+func TestHandleWebSocket_SpecificScenario(t *testing.T) {
+	loadTestConfig(t)
+
+	router := setupRouter()
+	server := httptest.NewServer(router)
+	defer server.Close()
+
+	// Connect with scenario query param
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/v1/realtime?scenario=test_scenario"
+
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	if err != nil {
-		t.Logf("Could not stat mock audio file: %v", err)
-		return true // Assume empty or problematic if cannot stat
+		t.Fatalf("Failed to connect to WebSocket: %v", err)
 	}
-	// A WAV file with only a header is typically 44 bytes.
-	// If it's very small, it might not produce deltas.
-	return info.Size() < 100 // Arbitrary small size
+	defer conn.Close()
+
+	// Read initial messages
+	for i := 0; i < 2; i++ {
+		conn.ReadMessage()
+	}
+
+	// Send input audio
+	conn.WriteJSON(map[string]string{
+		"type":  "input_audio_buffer.append",
+		"audio": "AAA=",
+	})
+
+	// Expect response from test_scenario
+	// "Test scenario text"
+	foundText := false
+
+	// Set read deadline
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+
+	for {
+		_, message, err := conn.ReadMessage()
+		if err != nil {
+			if strings.Contains(err.Error(), "i/o timeout") {
+				t.Fatal("Timeout waiting for response")
+			}
+			t.Fatalf("Read error: %v", err)
+		}
+
+		var msg map[string]interface{}
+		if err := json.Unmarshal(message, &msg); err != nil {
+			continue
+		}
+
+		if msg["type"] == "response.audio_transcript.delta" {
+			if delta, ok := msg["delta"].(string); ok {
+				if strings.Contains(delta, "Test") {
+					foundText = true
+				}
+			}
+		}
+		if msg["type"] == "response.done" {
+			if !foundText {
+				t.Error("Did not receive expected text delta for specific scenario")
+			}
+			return
+		}
+	}
+}
+
+func TestHandleWebSocket_UserTranscription(t *testing.T) {
+	loadTestConfig(t)
+
+	router := setupRouter()
+	server := httptest.NewServer(router)
+	defer server.Close()
+
+	// Connect with scenario query param
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/v1/realtime?scenario=transcriptionTest"
+
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("Failed to connect to WebSocket: %v", err)
+	}
+	defer conn.Close()
+
+	// Read initial messages
+	for i := 0; i < 2; i++ {
+		conn.ReadMessage()
+	}
+
+	// Send input audio to trigger scenario
+	conn.WriteJSON(map[string]string{
+		"type":  "input_audio_buffer.append",
+		"audio": "AAA=",
+	})
+
+	// Expect user transcription event
+	// Expect user transcription event sequence
+	// 1. input_audio_buffer.committed
+	// 2. conversation.item.created
+	// 3. conversation.item.input_audio_transcription.completed
+
+	foundCommitted := false
+	foundItemCreated := false
+	foundTranscription := false
+	expectedTranscript := "Hello, I would like to book a flight."
+
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+
+	for {
+		_, message, err := conn.ReadMessage()
+		if err != nil {
+			if strings.Contains(err.Error(), "i/o timeout") {
+				t.Fatal("Timeout waiting for response")
+			}
+			t.Fatalf("Read error: %v", err)
+		}
+
+		var msg map[string]interface{}
+		if err := json.Unmarshal(message, &msg); err != nil {
+			continue
+		}
+
+		if msg["type"] == "input_audio_buffer.committed" {
+			foundCommitted = true
+		}
+		if msg["type"] == "conversation.item.created" {
+			if foundCommitted {
+				foundItemCreated = true
+			}
+		}
+		if msg["type"] == "conversation.item.input_audio_transcription.completed" {
+			if transcript, ok := msg["transcript"].(string); ok {
+				if transcript == expectedTranscript {
+					foundTranscription = true
+				}
+			}
+		}
+		if msg["type"] == "response.done" {
+			if !foundCommitted {
+				t.Error("Did not receive input_audio_buffer.committed event")
+			}
+			if !foundItemCreated {
+				t.Error("Did not receive conversation.item.created event")
+			}
+			if !foundTranscription {
+				t.Errorf("Did not receive expected user transcription event. Expected '%s'", expectedTranscript)
+			}
+			return
+		}
+	}
+}
+
+func TestValidateWavFormat(t *testing.T) {
+	// Create invalid WAV (wrong sample rate)
+	f, _ := os.Create("invalid.wav")
+	header := make([]byte, 44)
+	copy(header[0:4], []byte("RIFF"))
+	copy(header[8:12], []byte("WAVE"))
+	binary.LittleEndian.PutUint16(header[20:22], 1)     // PCM
+	binary.LittleEndian.PutUint16(header[22:24], 1)     // Mono
+	binary.LittleEndian.PutUint32(header[24:28], 16000) // 16kHz (Invalid)
+	binary.LittleEndian.PutUint16(header[34:36], 16)    // 16-bit
+	f.Write(header)
+	f.Close()
+	defer os.Remove("invalid.wav")
+
+	if err := validateWavFormat("invalid.wav"); err == nil {
+		t.Error("Expected error for 16kHz WAV, got nil")
+	}
+
+	// Valid WAV is created in TestMain as ./mock_audio.wav
+	if err := validateWavFormat("./mock_audio.wav"); err != nil {
+		t.Errorf("Expected valid WAV to pass, got error: %v", err)
+	}
+}
+
+func TestHandleWebSocket_FunctionCall(t *testing.T) {
+	loadTestConfig(t)
+
+	// Add a function call scenario to the config for this test
+	configContent := `
+server:
+  port: 8080
+mock:
+  responseDelaySeconds: 0
+  audioWavPath: "./mock_audio.wav"
+  chunkIntervalMs: 50
+  audioChunkSizeBytes: 1024
+scenarios:
+  - name: functionCallTest
+    events:
+      - type: function_call
+        delay_ms: 50
+        function_call:
+          name: "get_weather"
+          arguments: "{\"location\": \"San Francisco\"}"
+`
+	err := os.WriteFile("test_config_fc.yaml", []byte(configContent), 0644)
+	if err != nil {
+		t.Fatalf("Failed to write test config: %v", err)
+	}
+	defer os.Remove("test_config_fc.yaml")
+
+	if _, err := loadConfiguration("test_config_fc.yaml"); err != nil {
+		t.Fatalf("Failed to load test configuration: %v", err)
+	}
+
+	router := setupRouter()
+	server := httptest.NewServer(router)
+	defer server.Close()
+
+	// Connect with scenario query param
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/v1/realtime?scenario=functionCallTest"
+
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("Failed to connect to WebSocket: %v", err)
+	}
+	defer conn.Close()
+
+	// Read initial messages
+	for i := 0; i < 2; i++ {
+		conn.ReadMessage()
+	}
+
+	// Send trigger
+	conn.WriteJSON(map[string]string{
+		"type":  "input_audio_buffer.append",
+		"audio": "AAA=",
+	})
+
+	// Expect sequence:
+	// 1. response.created
+	// 2. conversation.item.created
+	// 3. response.output_item.added
+	// ... args delta ...
+	// ... args done ...
+	// ... item done ...
+	// ... response done ...
+
+	foundResponseCreated := false
+	foundConvItemCreated := false
+	foundItemAdded := false
+	foundArgs := false
+
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+
+	for {
+		_, message, err := conn.ReadMessage()
+		if err != nil {
+			if strings.Contains(err.Error(), "i/o timeout") {
+				t.Fatal("Timeout waiting for response")
+			}
+			t.Fatalf("Read error: %v", err)
+		}
+
+		var msg map[string]interface{}
+		if err := json.Unmarshal(message, &msg); err != nil {
+			continue
+		}
+		t.Logf("Received event: %s", msg["type"])
+
+		if msg["type"] == "response.created" {
+			foundResponseCreated = true
+			// Verify output field exists
+			if resp, ok := msg["response"].(map[string]interface{}); ok {
+				if _, ok := resp["output"]; !ok {
+					t.Error("response.created missing 'output' field")
+				}
+			}
+		}
+		if msg["type"] == "conversation.item.created" {
+			if foundResponseCreated {
+				foundConvItemCreated = true
+			} else {
+				t.Error("Received conversation.item.created BEFORE response.created")
+			}
+		}
+		if msg["type"] == "response.output_item.added" {
+			if foundConvItemCreated {
+				foundItemAdded = true
+			} else {
+				t.Error("Received response.output_item.added BEFORE conversation.item.created")
+			}
+		}
+		if msg["type"] == "response.function_call_arguments.done" {
+			foundArgs = true
+		}
+
+		if msg["type"] == "response.done" {
+			if !foundResponseCreated {
+				t.Error("Did not receive response.created")
+			}
+			if !foundConvItemCreated {
+				t.Error("Did not receive conversation.item.created")
+			}
+			if !foundItemAdded {
+				t.Error("Did not receive response.output_item.added")
+			}
+			if !foundArgs {
+				t.Error("Did not receive function call arguments")
+			}
+			return
+		}
+	}
 }

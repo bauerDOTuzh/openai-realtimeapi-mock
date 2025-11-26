@@ -1,4 +1,4 @@
-# config.yaml - Simplified
+# config.yaml - Advanced Scenarios
 server:
   port: 8080
 
@@ -6,10 +6,66 @@ mock:
   # Delay in seconds after receiving the *first* audio chunk before responding
   responseDelaySeconds: 5
   # Path to the WAV file to play back (must be 16-bit PCM, 24kHz Mono ideally)
+  # NOTE: OpenAI Realtime API requires 24kHz PCM16 for input/output audio.
   audioWavPath: "./mock_audio.wav"
-  # The complete mock transcript text to send
-  transcriptText: "This is the simplified mock transcript being sent back."
   # How often to send audio/transcript chunks (milliseconds)
   chunkIntervalMs: 100
   # How many audio data bytes (after header) per chunk
   audioChunkSizeBytes: 4096
+
+# Mode: "mock" or "proxy"
+mode: "mock"
+
+proxy:
+  # Target URL for the OpenAI Realtime API
+  url: "wss://api.openai.com/v1/realtime"
+  # Directory to save recordings
+  recordingPath: "./recordings"
+  # Model to use for proxy
+  model: "gpt-realtime-mini"
+
+scenarios:
+  - name: default
+    events:
+      - type: message
+        delay_ms: 5000 # Delay after first audio received
+        text: "This is the simplified mock transcript being sent back."
+
+  - name: gatherMoreInformation 
+    events:
+      - type: message
+        delay_ms: 1000
+        text: "I understand you want to proceed, but I need some details first."
+      
+      - type: function_call
+        delay_ms: 2000
+        function_call:
+          name: "askForInformation"
+          arguments: "{\"field\": \"user_id\", \"reason\": \"verification\"}"
+      
+      - type: message
+        delay_ms: 3000
+        text: "Please provide your user ID."
+
+  - name: complex_conversation
+    events:
+      - type: user_transcription
+        delay_ms: 500
+        text: "Hi, I'm interested in your premium plan."
+      - type: message
+        delay_ms: 1000
+        text: "That's great! Our premium plan offers unlimited access. Do you have a specific budget in mind?"
+      - type: user_transcription
+        delay_ms: 2500
+        text: "Not really, but I need it for a team of 10."
+      - type: message
+        delay_ms: 3500
+        text: "Understood. For a team of 10, we have a special business tier. Would you like me to email you the details?"
+      - type: function_call
+        delay_ms: 5000
+        function_call:
+          name: "sendEmail"
+          arguments: "{\"recipient\": \"user@example.com\", \"subject\": \"Business Tier Details\"}"
+      - type: message
+        delay_ms: 6000
+        text: "I've prepared the email. Is there anything else you'd like to know?"
