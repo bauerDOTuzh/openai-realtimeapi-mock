@@ -50,11 +50,12 @@ type Scenario struct {
 }
 
 type Config struct {
-	Server    ServerConfig `yaml:"server"`
-	Mock      MockConfig   `yaml:"mock"`
-	Proxy     ProxyConfig  `yaml:"proxy"`
-	Mode      string       `yaml:"mode"`
-	Scenarios []Scenario   `yaml:"scenarios"`
+	Server             ServerConfig `yaml:"server"`
+	Mock               MockConfig   `yaml:"mock"`
+	Proxy              ProxyConfig  `yaml:"proxy"`
+	Mode               string       `yaml:"mode"`
+	LogInboundMessages bool         `yaml:"logInboundMessages"`
+	Scenarios          []Scenario   `yaml:"scenarios"`
 }
 
 // --- Global Variables ---

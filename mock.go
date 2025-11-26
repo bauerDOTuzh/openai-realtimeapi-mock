@@ -144,6 +144,18 @@ func handleMockWebSocket(w http.ResponseWriter, r *http.Request) {
 	var scenarioOnce sync.Once
 	audioReceived := false
 
+	// --- Inbound Recording ---
+	var inboundRecorder *Recorder
+	if appConfig.LogInboundMessages {
+		var err error
+		inboundRecorder, err = NewRecorder(appConfig.Proxy.RecordingPath, "inbound")
+		if err != nil {
+			log.Printf("Failed to initialize inbound recorder: %v", err)
+		} else {
+			defer inboundRecorder.Close()
+		}
+	}
+
 	// --- Read Loop ---
 	for {
 		messageType, message, err := safeConn.ReadMessage()
@@ -156,12 +168,17 @@ func handleMockWebSocket(w http.ResponseWriter, r *http.Request) {
 			break // Exit loop on error or close
 		}
 
+		// Record inbound message
+		if inboundRecorder != nil && messageType == websocket.TextMessage {
+			inboundRecorder.RecordMessage(message)
+		}
+
 		if messageType == websocket.TextMessage {
 			var base BaseEvent
 			if err := json.Unmarshal(message, &base); err == nil {
 				log.Printf("Client %s received event: %s", safeConn.RemoteAddr(), base.Type)
 
-				if base.Type == "input_audio_buffer.append" || base.Type == "response.create" {
+				if base.Type == "input_audio_buffer.append" {
 					if !audioReceived {
 						audioReceived = true
 						log.Printf("Client %s: Trigger event received (%s). Starting response.", safeConn.RemoteAddr(), base.Type)

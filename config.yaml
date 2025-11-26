@@ -16,6 +16,9 @@ mock:
 # Mode: "mock" or "proxy"
 mode: "mock"
 
+# Log inbound messages (Client -> Server) to a separate file
+logInboundMessages: true
+
 proxy:
   # Target URL for the OpenAI Realtime API
   url: "wss://api.openai.com/v1/realtime"

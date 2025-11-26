@@ -100,6 +100,18 @@ func handleProxyWebSocket(w http.ResponseWriter, r *http.Request) {
 	var wg sync.WaitGroup
 	wg.Add(2)
 
+	// Inbound Recorder (Client -> Server)
+	var inboundRecorder *Recorder
+	if appConfig.LogInboundMessages {
+		var err error
+		inboundRecorder, err = NewRecorder(appConfig.Proxy.RecordingPath, "inbound")
+		if err != nil {
+			log.Printf("Proxy: Failed to initialize inbound recorder: %v", err)
+		} else {
+			defer inboundRecorder.Close()
+		}
+	}
+
 	// Client -> OpenAI
 	go func() {
 		defer wg.Done()
@@ -110,6 +122,12 @@ func handleProxyWebSocket(w http.ResponseWriter, r *http.Request) {
 				openaiConn.Close() // Close upstream to stop the other loop
 				break
 			}
+
+			// Record inbound message
+			if inboundRecorder != nil && msgType == websocket.TextMessage {
+				inboundRecorder.RecordMessage(msg)
+			}
+
 			// Forward to OpenAI
 			if err := openaiConn.WriteMessage(msgType, msg); err != nil {
 				log.Printf("Proxy: Error writing to OpenAI: %v", err)
@@ -129,7 +147,7 @@ func handleProxyWebSocket(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 
-			// Record incoming message (from OpenAI)
+			// Record incoming message (from OpenAI) - Existing full recording
 			if msgType == websocket.TextMessage {
 				recordMessage("inbound", msg)
 			}
