@@ -176,7 +176,7 @@ func handleMockWebSocket(w http.ResponseWriter, r *http.Request) {
 		if messageType == websocket.TextMessage {
 			var base BaseEvent
 			if err := json.Unmarshal(message, &base); err == nil {
-				log.Printf("Client %s received event: %s", safeConn.RemoteAddr(), base.Type)
+				// log.Printf("Client %s received event: %s", safeConn.RemoteAddr(), base.Type)
 
 				if base.Type == "input_audio_buffer.append" {
 					if !audioReceived {
