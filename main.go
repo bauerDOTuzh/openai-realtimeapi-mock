@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -110,8 +112,18 @@ func main() {
 // setupRouter initializes the HTTP routes.
 func setupRouter() *http.ServeMux {
 	mux := http.NewServeMux()
+
+	// API Endpoints
 	mux.HandleFunc("/v1/realtime/sessions", handleCreateSession)
 	mux.HandleFunc("/v1/realtime", handleWebSocket)
+	mux.HandleFunc("/config", handleGetConfig)
+	mux.HandleFunc("/recordings", handleListRecordings)
+	mux.HandleFunc("/recordings/", handleGetRecording) // Note trailing slash for path parameter handling
+
+	// Static Files
+	fs := http.FileServer(http.Dir("./static"))
+	mux.Handle("/", fs)
+
 	return mux
 }
 
@@ -154,6 +166,73 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	// Mock Mode
 	handleMockWebSocket(w, r)
+}
+
+func handleGetConfig(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(appConfig)
+}
+
+type RecordingFile struct {
+	Name string `json:"name"`
+	Size int64  `json:"size"`
+}
+
+func handleListRecordings(w http.ResponseWriter, r *http.Request) {
+	recordingDir := appConfig.Proxy.RecordingPath
+	if recordingDir == "" {
+		recordingDir = "recordings"
+	}
+
+	entries, err := os.ReadDir(recordingDir)
+	if err != nil {
+		// If directory doesn't exist, return empty list instead of error
+		if os.IsNotExist(err) {
+			json.NewEncoder(w).Encode([]RecordingFile{})
+			return
+		}
+		http.Error(w, "Failed to read recordings directory", http.StatusInternalServerError)
+		return
+	}
+
+	var recordings []RecordingFile
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			info, err := entry.Info()
+			if err == nil {
+				recordings = append(recordings, RecordingFile{
+					Name: entry.Name(),
+					Size: info.Size(),
+				})
+			}
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(recordings)
+}
+
+func handleGetRecording(w http.ResponseWriter, r *http.Request) {
+	// Extract filename from path
+	filename := r.URL.Path[len("/recordings/"):]
+	if filename == "" {
+		http.Error(w, "Filename required", http.StatusBadRequest)
+		return
+	}
+
+	// Prevent directory traversal
+	if filepath.Base(filename) != filename {
+		http.Error(w, "Invalid filename", http.StatusBadRequest)
+		return
+	}
+
+	recordingDir := appConfig.Proxy.RecordingPath
+	if recordingDir == "" {
+		recordingDir = "recordings"
+	}
+
+	path := filepath.Join(recordingDir, filename)
+	http.ServeFile(w, r, path)
 }
 
 // --- Shared Helpers ---

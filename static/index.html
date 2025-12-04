@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenAI Realtime Mock Dashboard v4</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body class="bg-gray-900 text-white font-sans antialiased">
+    <div id="app" class="container mx-auto p-6">
+        <header class="mb-8 flex justify-between items-center border-b border-gray-700 pb-4">
+            <div>
+                <h1 class="text-3xl font-bold text-blue-400">Realtime Mock Dashboard</h1>
+                <p class="text-gray-400 text-sm mt-1">Inspect scenarios, recordings, and server state.</p>
+            </div>
+            <div id="connection-status" class="px-3 py-1 rounded-full text-xs font-semibold bg-red-900 text-red-200">
+                Disconnected
+            </div>
+        </header>
+
+        <main class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <!-- Left Column: Config & Scenarios -->
+            <div class="lg:col-span-1 space-y-6">
+                <!-- Server Config -->
+                <section class="bg-gray-800 rounded-lg p-5 shadow-lg border border-gray-700">
+                    <h2 class="text-xl font-semibold mb-4 text-green-400 border-b border-gray-700 pb-2">Server
+                        Configuration</h2>
+                    <div id="config-display" class="text-sm space-y-2">
+                        <div class="animate-pulse h-4 bg-gray-700 rounded w-3/4"></div>
+                        <div class="animate-pulse h-4 bg-gray-700 rounded w-1/2"></div>
+                    </div>
+                </section>
+
+                <!-- Scenarios List -->
+                <section class="bg-gray-800 rounded-lg p-5 shadow-lg border border-gray-700">
+                    <h2 class="text-xl font-semibold mb-4 text-purple-400 border-b border-gray-700 pb-2">Scenarios</h2>
+                    <ul id="scenarios-list" class="space-y-2 text-sm">
+                        <li class="text-gray-500 italic">Loading scenarios...</li>
+                    </ul>
+                </section>
+            </div>
+
+            <!-- Right Column: Recordings & Details -->
+            <div class="lg:col-span-2 space-y-6">
+                <!-- Recordings List -->
+                <section class="bg-gray-800 rounded-lg p-5 shadow-lg border border-gray-700">
+                    <div class="flex justify-between items-center mb-4 border-b border-gray-700 pb-2">
+                        <h2 class="text-xl font-semibold text-yellow-400">Recordings</h2>
+                        <button id="refresh-recordings"
+                            class="text-xs bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded transition">Refresh</button>
+                    </div>
+                    <div class="overflow-y-auto max-h-64">
+                        <table class="w-full text-left text-sm">
+                            <thead class="text-gray-400 sticky top-0 bg-gray-800">
+                                <tr>
+                                    <th class="pb-2">Name</th>
+                                    <th class="pb-2 text-right">Size</th>
+                                    <th class="pb-2 text-right">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="recordings-list" class="divide-y divide-gray-700">
+                                <tr>
+                                    <td colspan="3" class="py-2 text-center text-gray-500 italic">Loading recordings...
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <!-- Recording Viewer -->
+                <section id="recording-viewer"
+                    class="bg-gray-800 rounded-lg p-5 shadow-lg border border-gray-700 hidden">
+                    <div class="flex justify-between items-center mb-4 border-b border-gray-700 pb-2">
+                        <h2 class="text-xl font-semibold text-blue-300" id="viewer-title">Recording Details</h2>
+                        <button id="close-viewer" class="text-gray-400 hover:text-white">&times;</button>
+                    </div>
+                    <div id="viewer-content"
+                        class="bg-gray-900 rounded overflow-x-auto text-xs font-mono h-96 overflow-y-auto text-green-300">
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+    <script src="app.js?v=4"></script>
+</body>
+
+</html>

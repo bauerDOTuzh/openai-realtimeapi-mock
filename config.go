@@ -16,46 +16,46 @@ import (
 // --- Configuration Structs ---
 
 type ServerConfig struct {
-	Port int `yaml:"port"`
+	Port int `yaml:"port" json:"port"`
 }
 
 type MockConfig struct {
-	ResponseDelaySeconds int    `yaml:"responseDelaySeconds"`
-	AudioWavPath         string `yaml:"audioWavPath"`
-	ChunkIntervalMs      int    `yaml:"chunkIntervalMs"`
-	AudioChunkSizeBytes  int    `yaml:"audioChunkSizeBytes"`
+	ResponseDelaySeconds int    `yaml:"responseDelaySeconds" json:"responseDelaySeconds"`
+	AudioWavPath         string `yaml:"audioWavPath" json:"audioWavPath"`
+	ChunkIntervalMs      int    `yaml:"chunkIntervalMs" json:"chunkIntervalMs"`
+	AudioChunkSizeBytes  int    `yaml:"audioChunkSizeBytes" json:"audioChunkSizeBytes"`
 }
 
 type ProxyConfig struct {
-	URL           string `yaml:"url"`
-	RecordingPath string `yaml:"recordingPath"`
-	Model         string `yaml:"model"`
+	URL           string `yaml:"url" json:"url"`
+	RecordingPath string `yaml:"recordingPath" json:"recordingPath"`
+	Model         string `yaml:"model" json:"model"`
 }
 
 type Event struct {
-	Type         string                  `yaml:"type"` // "message", "function_call", "user_transcription"
-	DelayMs      int                     `yaml:"delay_ms"`
-	Text         string                  `yaml:"text,omitempty"`          // For "message" and "user_transcription"
-	FunctionCall *FunctionCallDefinition `yaml:"function_call,omitempty"` // For "function_call"
+	Type         string                  `yaml:"type" json:"type"` // "message", "function_call", "user_transcription"
+	DelayMs      int                     `yaml:"delay_ms" json:"delay_ms"`
+	Text         string                  `yaml:"text,omitempty" json:"text,omitempty"`                   // For "message" and "user_transcription"
+	FunctionCall *FunctionCallDefinition `yaml:"function_call,omitempty" json:"function_call,omitempty"` // For "function_call"
 }
 
 type FunctionCallDefinition struct {
-	Name      string `yaml:"name"`
-	Arguments string `yaml:"arguments"` // JSON string of arguments
+	Name      string `yaml:"name" json:"name"`
+	Arguments string `yaml:"arguments" json:"arguments"` // JSON string of arguments
 }
 
 type Scenario struct {
-	Name   string  `yaml:"name"`
-	Events []Event `yaml:"events"`
+	Name   string  `yaml:"name" json:"name"`
+	Events []Event `yaml:"events" json:"events"`
 }
 
 type Config struct {
-	Server             ServerConfig `yaml:"server"`
-	Mock               MockConfig   `yaml:"mock"`
-	Proxy              ProxyConfig  `yaml:"proxy"`
-	Mode               string       `yaml:"mode"`
-	LogInboundMessages bool         `yaml:"logInboundMessages"`
-	Scenarios          []Scenario   `yaml:"scenarios"`
+	Server             ServerConfig `yaml:"server" json:"server"`
+	Mock               MockConfig   `yaml:"mock" json:"mock"`
+	Proxy              ProxyConfig  `yaml:"proxy" json:"proxy"`
+	Mode               string       `yaml:"mode" json:"mode"`
+	LogInboundMessages bool         `yaml:"logInboundMessages" json:"logInboundMessages"`
+	Scenarios          []Scenario   `yaml:"scenarios" json:"scenarios"`
 }
 
 // --- Global Variables ---

@@ -42,8 +42,11 @@ RUN mkdir -p /app/config
 COPY config.yaml /app/config/config.yaml
 COPY mock_audio.wav /app/config/mock_audio.wav
 
-# Ensure the /app/config directory and its contents are owned by the appuser
-RUN chown -R appuser:appgroup /app/config
+# Copy static assets for the web UI
+COPY static /app/static
+
+# Ensure the /app/config and /app/static directories and their contents are owned by the appuser
+RUN chown -R appuser:appgroup /app/config /app/static
 # Ensure the server binary is executable and owned by appuser
 RUN chown appuser:appgroup /app/simple-mock-server && chmod +x /app/simple-mock-server
 
