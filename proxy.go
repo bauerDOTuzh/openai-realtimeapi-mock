@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -54,63 +53,48 @@ func handleProxyWebSocket(w http.ResponseWriter, r *http.Request) {
 	defer openaiConn.Close()
 	log.Printf("Proxy: Connected to OpenAI")
 
-	// 3. Setup Recording
+	// 3. Setup Recording based on config
+	recordingName := r.URL.Query().Get("recording_name")
 	recordingDir := appConfig.Proxy.RecordingPath
 	if recordingDir == "" {
 		recordingDir = "recordings"
 	}
-	if err := os.MkdirAll(recordingDir, 0755); err != nil {
-		log.Printf("Proxy: Failed to create recording directory: %v", err)
-	}
 
-	timestamp := time.Now().Format("2006-01-02_15-04-05")
-	recordingFile := filepath.Join(recordingDir, fmt.Sprintf("%s.ndjson", timestamp))
-	recFile, err := os.OpenFile(recordingFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		log.Printf("Proxy: Failed to open recording file: %v", err)
+	// Generate base name for this session
+	var baseName string
+	if recordingName != "" {
+		baseName = filepath.Base(recordingName)
 	} else {
-		log.Printf("Proxy: Recording to %s", recordingFile)
-		defer recFile.Close()
+		baseName = time.Now().Format("2006-01-02_15-04-05")
 	}
 
-	// Helper to record messages
-	recordMessage := func(direction string, msg []byte) {
-		if recFile == nil {
-			return
-		}
-		// We only record JSON text messages for replayability
-		if json.Valid(msg) {
-			event := RecordedEvent{
-				Timestamp: time.Now().UnixMilli(),
-				Data:      json.RawMessage(msg),
-			}
-			line, err := json.Marshal(event)
-			if err != nil {
-				log.Printf("Proxy: Error marshaling recorded event: %v", err)
-				return
-			}
-			line = append(line, '\n')
-			if _, err := recFile.Write(line); err != nil {
-				log.Printf("Proxy: Error writing to recording file: %v", err)
-			}
-		}
-	}
-
-	// 4. Bi-directional Forwarding
-	var wg sync.WaitGroup
-	wg.Add(2)
-
-	// Inbound Recorder (Client -> Server)
+	// Inbound Recorder (Client -> Server) - controlled by logInbound config
 	var inboundRecorder *Recorder
-	if appConfig.LogInboundMessages {
-		var err error
-		inboundRecorder, err = NewRecorder(appConfig.Proxy.RecordingPath, "inbound")
+	if appConfig.LogInbound {
+		inboundName := "inbound_" + baseName
+		inboundRecorder, err = NewRecorder(recordingDir, "inbound", inboundName)
 		if err != nil {
 			log.Printf("Proxy: Failed to initialize inbound recorder: %v", err)
 		} else {
 			defer inboundRecorder.Close()
 		}
 	}
+
+	// Outbound Recorder (Server -> Client) - controlled by logOutbound config (proxy mode only)
+	var outboundRecorder *Recorder
+	if appConfig.LogOutbound {
+		outboundName := "outbound_" + baseName
+		outboundRecorder, err = NewRecorder(recordingDir, "outbound", outboundName)
+		if err != nil {
+			log.Printf("Proxy: Failed to initialize outbound recorder: %v", err)
+		} else {
+			defer outboundRecorder.Close()
+		}
+	}
+
+	// 4. Bi-directional Forwarding
+	var wg sync.WaitGroup
+	wg.Add(2)
 
 	// Client -> OpenAI
 	go func() {
@@ -123,7 +107,7 @@ func handleProxyWebSocket(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 
-			// Record inbound message
+			// Record inbound message (client -> OpenAI)
 			if inboundRecorder != nil && msgType == websocket.TextMessage {
 				inboundRecorder.RecordMessage(msg)
 			}
@@ -147,9 +131,9 @@ func handleProxyWebSocket(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 
-			// Record incoming message (from OpenAI) - Existing full recording
-			if msgType == websocket.TextMessage {
-				recordMessage("inbound", msg)
+			// Record outbound message (OpenAI -> client)
+			if outboundRecorder != nil && msgType == websocket.TextMessage {
+				outboundRecorder.RecordMessage(msg)
 			}
 
 			// Forward to Client

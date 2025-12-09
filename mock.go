@@ -37,10 +37,22 @@ func handleMockWebSocket(w http.ResponseWriter, r *http.Request) {
 			recordingDir = "recordings"
 		}
 
-		// Try exact match or with .ndjson extension
+		// Clean the name (remove extension if present)
+		baseName := strings.TrimSuffix(replaySessionName, ".ndjson")
+
+		// Search paths in order of preference
 		possiblePaths := []string{
-			filepath.Join(recordingDir, replaySessionName),
-			filepath.Join(recordingDir, replaySessionName+".ndjson"),
+			// 1. Examples (e.g., recordings/examples/my_test.ndjson)
+			filepath.Join(recordingDir, "examples", baseName+".ndjson"),
+			filepath.Join(recordingDir, "examples", baseName),
+
+			// 2. Recorded (e.g., recordings/recorded/my_test.ndjson)
+			filepath.Join(recordingDir, "recorded", baseName+".ndjson"),
+			filepath.Join(recordingDir, "recorded", baseName),
+
+			// 3. Fallback to root (legacy)
+			filepath.Join(recordingDir, baseName+".ndjson"),
+			filepath.Join(recordingDir, baseName),
 		}
 
 		for _, path := range possiblePaths {
@@ -53,7 +65,7 @@ func handleMockWebSocket(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if !found {
-			log.Printf("Replay session '%s' not found in %s", replaySessionName, recordingDir)
+			log.Printf("Replay session '%s' not found in %s (checked examples and recorded subdirs)", replaySessionName, recordingDir)
 		}
 	}
 
@@ -146,9 +158,14 @@ func handleMockWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	// --- Inbound Recording ---
 	var inboundRecorder *Recorder
-	if appConfig.LogInboundMessages {
+	if appConfig.LogInbound {
 		var err error
-		inboundRecorder, err = NewRecorder(appConfig.Proxy.RecordingPath, "inbound")
+		recordingName := r.URL.Query().Get("recording_name")
+		inboundName := ""
+		if recordingName != "" {
+			inboundName = "inbound_" + recordingName
+		}
+		inboundRecorder, err = NewRecorder(appConfig.Proxy.RecordingPath, "inbound", inboundName)
 		if err != nil {
 			log.Printf("Failed to initialize inbound recorder: %v", err)
 		} else {

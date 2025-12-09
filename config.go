@@ -50,12 +50,13 @@ type Scenario struct {
 }
 
 type Config struct {
-	Server             ServerConfig `yaml:"server" json:"server"`
-	Mock               MockConfig   `yaml:"mock" json:"mock"`
-	Proxy              ProxyConfig  `yaml:"proxy" json:"proxy"`
-	Mode               string       `yaml:"mode" json:"mode"`
-	LogInboundMessages bool         `yaml:"logInboundMessages" json:"logInboundMessages"`
-	Scenarios          []Scenario   `yaml:"scenarios" json:"scenarios"`
+	Server      ServerConfig `yaml:"server" json:"server"`
+	Mock        MockConfig   `yaml:"mock" json:"mock"`
+	Proxy       ProxyConfig  `yaml:"proxy" json:"proxy"`
+	Mode        string       `yaml:"mode" json:"mode"`
+	LogInbound  bool         `yaml:"logInbound" json:"logInbound"`   // Log client -> server messages (both modes)
+	LogOutbound bool         `yaml:"logOutbound" json:"logOutbound"` // Log server -> client messages (proxy mode only)
+	Scenarios   []Scenario   `yaml:"scenarios" json:"scenarios"`
 }
 
 // --- Global Variables ---
@@ -63,51 +64,38 @@ type Config struct {
 var appConfig Config // Loaded config
 
 const (
-	customConfigPath = "/app/custom_config/config.yaml"
 	// Default config path if -config flag is not provided or for Docker's CMD
+
 	defaultConfigFlagValue = "config.yaml"
 )
 
 // loadConfiguration loads the application configuration.
 func loadConfiguration(cliConfigPath string) (string, error) {
-	var selectedConfigFile string
-
-	log.Printf("Attempting to load custom config from %s", customConfigPath)
-	if _, err := os.Stat(customConfigPath); err == nil {
-		log.Printf("Custom config file found at %s. Loading it.", customConfigPath)
-		selectedConfigFile = customConfigPath
-	} else if os.IsNotExist(err) {
-		log.Printf("Custom config file not found at %s. Using config path from -config flag: %s", customConfigPath, cliConfigPath)
-		selectedConfigFile = cliConfigPath
-	} else {
-		return "", fmt.Errorf("error checking custom config file %s: %w", customConfigPath, err)
-	}
-
-	log.Printf("Loading configuration from: %s", selectedConfigFile)
-	data, err := os.ReadFile(selectedConfigFile)
+	log.Printf("Loading configuration from: %s", cliConfigPath)
+	data, err := os.ReadFile(cliConfigPath)
 	if err != nil {
-		return selectedConfigFile, fmt.Errorf("failed to read config file %s: %w", selectedConfigFile, err)
+		return cliConfigPath, fmt.Errorf("failed to read config file %s: %w", cliConfigPath, err)
 	}
 	err = yaml.Unmarshal(data, &appConfig)
 	if err != nil {
-		return selectedConfigFile, fmt.Errorf("failed to parse config file %s: %w", selectedConfigFile, err)
+		return cliConfigPath, fmt.Errorf("failed to parse config file %s: %w", cliConfigPath, err)
 	}
 
 	// Validate configuration
 	if err := validateConfig(&appConfig); err != nil {
-		return selectedConfigFile, fmt.Errorf("configuration validation failed: %w", err)
+		return cliConfigPath, fmt.Errorf("configuration validation failed: %w", err)
 	}
 
 	// Resolve audioWavPath
 	if appConfig.Mock.AudioWavPath != "" && !filepath.IsAbs(appConfig.Mock.AudioWavPath) {
-		configDir := filepath.Dir(selectedConfigFile)
+		configDir := filepath.Dir(cliConfigPath)
 		resolvedAudioPath := filepath.Join(configDir, appConfig.Mock.AudioWavPath)
 		log.Printf("Original audioWavPath: '%s'. Config file directory: '%s'. Resolved audioWavPath to: '%s'", appConfig.Mock.AudioWavPath, configDir, resolvedAudioPath)
 		appConfig.Mock.AudioWavPath = resolvedAudioPath
 	} else {
 		log.Printf("audioWavPath '%s' is absolute or empty, using as is.", appConfig.Mock.AudioWavPath)
 	}
-	return selectedConfigFile, nil
+	return cliConfigPath, nil
 }
 
 func validateConfig(cfg *Config) error {

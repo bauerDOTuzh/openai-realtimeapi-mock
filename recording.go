@@ -19,17 +19,32 @@ type Recorder struct {
 // NewRecorder creates a new Recorder instance.
 // It creates the file with a timestamped name in the specified directory.
 // prefix is used for the filename (e.g., "inbound", "proxy").
-func NewRecorder(dir string, prefix string) (*Recorder, error) {
-	if dir == "" {
-		dir = "recordings"
+// NewRecorder creates a new Recorder instance.
+// It creates the file in the 'recorded' subdirectory of the specified directory.
+// prefix is used for the filename if name is not provided (e.g., "inbound", "proxy").
+// name is an optional custom filename overrides the timestamp.
+func NewRecorder(baseDir string, prefix string, name string) (*Recorder, error) {
+	if baseDir == "" {
+		baseDir = "recordings"
 	}
-	if err := os.MkdirAll(dir, 0755); err != nil {
+
+	// Always save new recordings to 'recorded' subdirectory
+	targetDir := filepath.Join(baseDir, "recorded")
+	if err := os.MkdirAll(targetDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create recording directory: %w", err)
 	}
 
-	timestamp := time.Now().Format("2006-01-02_15-04-05")
-	filename := fmt.Sprintf("%s_%s.ndjson", prefix, timestamp)
-	path := filepath.Join(dir, filename)
+	var filename string
+	if name != "" {
+		// Sanitize name to prevent directory traversal
+		name = filepath.Base(name)
+		filename = fmt.Sprintf("%s.ndjson", name)
+	} else {
+		timestamp := time.Now().Format("2006-01-02_15-04-05")
+		filename = fmt.Sprintf("%s_%s.ndjson", prefix, timestamp)
+	}
+
+	path := filepath.Join(targetDir, filename)
 
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {

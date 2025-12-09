@@ -7,7 +7,7 @@ mock:
   responseDelaySeconds: 5
   # Path to the WAV file to play back (must be 16-bit PCM, 24kHz Mono ideally)
   # NOTE: OpenAI Realtime API requires 24kHz PCM16 for input/output audio.
-  audioWavPath: "./mock_audio.wav"
+  audioWavPath: "./config/mock_audio.wav"
   # How often to send audio/transcript chunks (milliseconds)
   chunkIntervalMs: 100
   # How many audio data bytes (after header) per chunk
@@ -16,14 +16,13 @@ mock:
 # Mode: "mock" or "proxy"
 mode: "mock"
 
-# Log inbound messages (Client -> Server) to a separate file
-logInboundMessages: true
+# Recording options
+logInbound: true   # Log client -> server messages (works in both modes)
+logOutbound: true  # Log server -> client messages (proxy mode only)
 
 proxy:
   # Target URL for the OpenAI Realtime API
   url: "wss://api.openai.com/v1/realtime"
-  # Directory to save recordings
-  recordingPath: "./recordings"
   # Model to use for proxy
   model: "gpt-realtime-mini"
 
